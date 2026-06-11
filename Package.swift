@@ -19,6 +19,9 @@ let package = Package(
             name: "Wordiy"),
         .testTarget(
             name: "WordiyTests",
-            dependencies: ["Wordiy"]),
+            dependencies: ["Wordiy"],
+            resources: [
+                .copy("Resources")
+            ]),
     ]
 )
