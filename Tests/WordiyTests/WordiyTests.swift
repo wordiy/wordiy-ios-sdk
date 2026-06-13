@@ -13,12 +13,18 @@ final class WordiyTests: XCTestCase {
         XCTAssertEqual(sut.localizationType, .production)
     }
 
-    func testSetProjectIDStoresCredentialsAndInitializes() {
+    func testSetTokenStoresTokenAndInitializes() {
         let sut = Wordiy.shared
-        sut.setProjectID("demo-project-id", token: "demo-token")
-        XCTAssertEqual(sut.projectID, "demo-project-id")
+        sut.setToken("demo-token")
         XCTAssertEqual(sut.token, "demo-token")
-        XCTAssertTrue(sut.isInitialized)
+        XCTAssertTrue(sut.isInitialized, "the token alone is enough to initialize")
+    }
+
+    func testSetProjectIDIsOptional() {
+        let sut = Wordiy.shared
+        // projectID can be set independently; it is not required and does not gate initialization.
+        sut.setProjectID("demo-project-id")
+        XCTAssertEqual(sut.projectID, "demo-project-id")
     }
 
     func testSettingsRoundTrip() {

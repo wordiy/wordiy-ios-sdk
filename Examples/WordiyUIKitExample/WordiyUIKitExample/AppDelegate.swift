@@ -10,8 +10,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     ) -> Bool {
 
         // Configure the Wordiy SDK.
-        // The cdl_ key is a read-only, embed-safe Content Delivery key for the staging project.
-        Wordiy.shared.setProjectID("1", token: "cdl_r3UNt0bbu3bM3pENlyBGgkB1s8tTRdey")
+        // Required: the cdl_ key is a read-only, embed-safe Content Delivery key (scopes the project).
+        Wordiy.shared.setToken("cdl_r3UNt0bbu3bM3pENlyBGgkB1s8tTRdey")
+        // Optional: reserved for future integrations; not used by the bundle-check request.
+        Wordiy.shared.setProjectID("1")
         Wordiy.shared.localizationType = .production
         // `current_version` is "the version this app already has". Claim an OLDER version than the
         // latest published bundle so the server reports an update and we actually download one.

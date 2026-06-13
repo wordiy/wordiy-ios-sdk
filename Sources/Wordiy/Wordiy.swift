@@ -8,7 +8,7 @@ import Foundation
 ///
 /// ## Usage
 /// ```swift
-/// Wordiy.shared.setProjectID("your-project-id", token: "your-sdk-token")
+/// Wordiy.shared.setToken("your-sdk-token")   // required (the project-scoped Api-Key)
 /// Wordiy.shared.localizationType = .production
 /// Wordiy.shared.currentVersion = "v1.0.0"
 ///
@@ -31,20 +31,28 @@ public final class Wordiy {
 
     // MARK: - Credentials
 
-    /// The configured project identifier, or `nil` before ``setProjectID(_:token:)`` is called.
-    public private(set) var projectID: String?
-
-    /// The configured SDK token, or `nil` before ``setProjectID(_:token:)`` is called.
+    /// The configured SDK token (the project-scoped Content Delivery key, sent as `Api-Key`), or
+    /// `nil` before ``setToken(_:)`` is called.
     public private(set) var token: String?
 
-    /// Whether the SDK has been configured with a project ID and token.
+    /// The optional project identifier, or `nil` if never set. Reserved for future integrations —
+    /// it is **not** part of the bundle-check request (the token already scopes the project).
+    public private(set) var projectID: String?
+
+    /// Whether the SDK has been configured with a token.
     public private(set) var isInitialized = false
 
-    /// Configures the SDK with the project credentials.
-    public func setProjectID(_ projectID: String, token: String) {
-        self.projectID = projectID
+    /// Configures the SDK with its token — the project-scoped Content Delivery key sent as the
+    /// `Api-Key` header. **Required** before calling ``checkForUpdates()``.
+    public func setToken(_ token: String) {
         self.token = token
         self.isInitialized = true
+    }
+
+    /// Optionally sets the project identifier. This is reserved for future integrations and is not
+    /// used by the bundle-check request, so it is not required to use the SDK.
+    public func setProjectID(_ projectID: String) {
+        self.projectID = projectID
     }
 
     // MARK: - Settings

@@ -5,7 +5,7 @@ import Foundation
 /// Every failure path in the SDK is funneled into one of these cases — the SDK never traps or crashes
 /// the host app. Network/IO underlying errors are wrapped so callers can inspect them if needed.
 public enum WordiyError: Error, Sendable {
-    /// `setProjectID(_:token:)` has not been called (missing project ID / token).
+    /// `setToken(_:)` has not been called (missing token).
     case notInitialized
     /// `currentVersion` is empty; the bundles API requires a version.
     case missingCurrentVersion
@@ -33,7 +33,7 @@ extension WordiyError: CustomStringConvertible {
     public var description: String {
         switch self {
         case .notInitialized:
-            return "Wordiy is not initialized. Call setProjectID(_:token:) first."
+            return "Wordiy is not initialized. Call setToken(_:) first."
         case .missingCurrentVersion:
             return "currentVersion is empty. Set Wordiy.shared.currentVersion before checking for updates."
         case .network(let error):

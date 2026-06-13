@@ -30,7 +30,7 @@ final class CheckForUpdatesTests: XCTestCase {
         stub.downloadData = try ZipTestSupport.sampleBundleZip64()
 
         let w = Wordiy.shared
-        w.setProjectID("proj", token: "cdl_test")
+        w.setToken("cdl_test")
         w.currentVersion = "1.0.0"
         w.localizationType = .production
         w.urlSession = stub
@@ -56,7 +56,7 @@ final class CheckForUpdatesTests: XCTestCase {
         stub.downloadData = try ZipTestSupport.sampleBundleZip64()
 
         let w = Wordiy.shared
-        w.setProjectID("proj", token: "cdl_test")
+        w.setToken("cdl_test")
         w.currentVersion = "1.0.0"
         w.urlSession = stub
         w.store = freshStore("store-report")
@@ -81,7 +81,7 @@ final class CheckForUpdatesTests: XCTestCase {
         stub.checkData = Data(#"{"update_available":false,"bundle":null}"#.utf8)
 
         let w = Wordiy.shared
-        w.setProjectID("proj", token: "cdl_test")
+        w.setToken("cdl_test")
         w.currentVersion = "1.0.0"
         w.urlSession = stub
         let store = freshStore("store-noop")
@@ -94,7 +94,7 @@ final class CheckForUpdatesTests: XCTestCase {
 
     func testMissingCurrentVersionThrows() async throws {
         let w = Wordiy.shared
-        w.setProjectID("proj", token: "cdl_test")
+        w.setToken("cdl_test")
         w.currentVersion = ""
         w.store = freshStore("store-missing")
         do {
@@ -113,7 +113,7 @@ final class CheckForUpdatesTests: XCTestCase {
         stub.checkData = Data(#"{"message":"bad key","statusCode":401}"#.utf8)
 
         let w = Wordiy.shared
-        w.setProjectID("proj", token: "cdl_bad")
+        w.setToken("cdl_bad")
         w.currentVersion = "1.0.0"
         w.urlSession = stub
         w.store = freshStore("store-401")
