@@ -100,6 +100,11 @@ public final class Wordiy {
     var urlSession: URLSessionProtocol = URLSession.shared
     var store: BundleStore?
 
+    /// Overrides the language used to pick which OTA `.lproj` to serve. `nil` (the default) resolves
+    /// the app's selected language via ``Bundle/preferredLocalizations``. Reserved for tests and for a
+    /// future explicit language-switch API.
+    var preferredLanguageOverride: String?
+
     // MARK: - Update
 
     /// Checks the server for a newer translation bundle and, if available, downloads, unzips, and
@@ -137,6 +142,8 @@ public final class Wordiy {
 
         if result.updated {
             installedBundleVersion = result.version ?? store.installedVersion()
+            // Pick up the freshly installed strings so an active swizzle serves them.
+            refreshOTABundle()
         }
         return result.updated
     }
@@ -151,6 +158,55 @@ public final class Wordiy {
                 completion(.failure(error))
             }
         }
+    }
+
+    // MARK: - Localization swizzling
+
+    /// Routes plain `NSLocalizedString` (and storyboard/XIB strings) through the installed OTA bundle:
+    /// a key present in the OTA bundle for the app's selected language returns the OTA value; anything
+    /// else falls back to the app's baked-in `.strings`. Opt-in, idempotent, and safe to call before
+    /// any bundle is installed.
+    ///
+    /// Recommended boot order: ``setToken(_:)`` → ``swizzleMainBundle()`` → ``checkForUpdates()``.
+    public func swizzleMainBundle() {
+        refreshOTABundle()
+        WordiyBundleSwizzler.shared.swizzle()
+    }
+
+    /// Restores the original `NSBundle` behavior installed by ``swizzleMainBundle()``. Idempotent.
+    public func deswizzleMainBundle() {
+        WordiyBundleSwizzler.shared.deswizzle()
+    }
+
+    /// Loads the OTA `.lproj` for the app's selected language into the swizzler (or clears it when no
+    /// matching bundle is installed). Called on install and from ``swizzleMainBundle()``.
+    private func refreshOTABundle() {
+        WordiyBundleSwizzler.shared.setOTABundle(resolveOTALocaleBundle())
+    }
+
+    /// The installed OTA bundle narrowed to the app's selected language, or `nil` if none is installed
+    /// or the language isn't shipped in the bundle.
+    private func resolveOTALocaleBundle() -> Bundle? {
+        guard let url = installedBundleURL, let whole = Bundle(url: url) else { return nil }
+        for language in preferredLanguageCandidates() {
+            if let lprojPath = whole.path(forResource: language, ofType: "lproj"),
+                let localeBundle = Bundle(path: lprojPath)
+            {
+                return localeBundle
+            }
+        }
+        return nil
+    }
+
+    /// The app's selected language, plus its bare language code as a fallback (e.g. `en-US` → `en`).
+    private func preferredLanguageCandidates() -> [String] {
+        let primary =
+            preferredLanguageOverride
+            ?? Bundle.main.preferredLocalizations.first
+            ?? Locale.preferredLanguages.first
+            ?? "en"
+        let bare = primary.split(separator: "-").first.map(String.init) ?? primary
+        return primary == bare ? [primary] : [primary, bare]
     }
 
     /// The off-main pipeline: check → (if update) download → unzip → install.
