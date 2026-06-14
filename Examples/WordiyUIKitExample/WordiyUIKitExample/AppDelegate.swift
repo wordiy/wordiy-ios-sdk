@@ -19,6 +19,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // latest published bundle so the server reports an update and we actually download one.
         // (Set this to the latest, e.g. "1.1.0", to see the "up to date / no download" branch.)
         Wordiy.shared.currentVersion = "1.0.0"
+        // Route NSLocalizedString through the OTA bundle. Loads any previously cached bundle from disk
+        // now, so on relaunch the labels show OTA values immediately — before any network call.
+        Wordiy.shared.swizzleMainBundle()
 
         return true
     }

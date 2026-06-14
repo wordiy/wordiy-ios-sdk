@@ -1,0 +1,4 @@
+/* Baked-in defaults shipped with the app. The " (local)" marker lets us tell these apart from the
+   OTA values that override them after Wordiy.shared.checkForUpdates(). */
+"welcome" = "welcome to wordiy (local)";
+"intro" = "This is an introduction message (local)";
