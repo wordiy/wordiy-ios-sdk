@@ -27,6 +27,7 @@ public final class Wordiy {
     private init() {
         store = try? BundleStore()
         installedBundleVersion = store?.installedVersion()
+        loadPersistedLanguage()
     }
 
     // MARK: - Credentials
@@ -99,11 +100,10 @@ public final class Wordiy {
     // Injectable seams (internal — overridden in tests; production uses the defaults).
     var urlSession: URLSessionProtocol = URLSession.shared
     var store: BundleStore?
+    var defaults: UserDefaults = .standard
 
-    /// Overrides the language used to pick which OTA `.lproj` to serve. `nil` (the default) resolves
-    /// the app's selected language via ``Bundle/preferredLocalizations``. Reserved for tests and for a
-    /// future explicit language-switch API.
-    var preferredLanguageOverride: String?
+    /// Key under which ``setLanguage(_:makeDefault:)`` persists the selected language.
+    private static let persistedLanguageKey = "com.wordiy.selectedLanguage"
 
     // MARK: - Update
 
@@ -178,18 +178,66 @@ public final class Wordiy {
         WordiyBundleSwizzler.shared.deswizzle()
     }
 
-    /// Loads the OTA `.lproj` for the app's selected language into the swizzler (or clears it when no
-    /// matching bundle is installed). Called on install and from ``swizzleMainBundle()``.
-    private func refreshOTABundle() {
-        WordiyBundleSwizzler.shared.setOTABundle(resolveOTALocaleBundle())
+    /// The language forced via ``setLanguage(_:makeDefault:)``, or `nil` when following the system.
+    public private(set) var selectedLanguage: String?
+
+    /// Forces the language used for **both** OTA lookups and the baked-in `.strings` fallback, so the
+    /// UI can switch language live (`NSLocalizedString`'s language is otherwise fixed at launch). Pass
+    /// `nil` to follow the system again.
+    ///
+    /// - Parameters:
+    ///   - languageCode: a language code such as `"en"` or `"ar"`, or `nil` to follow the system.
+    ///   - makeDefault: when `true`, remember the choice across launches (persisted, restored at init).
+    ///     When `false` (default), the change is for this session only and any saved default is kept.
+    ///
+    /// Re-render your UI after calling — UIKit/SwiftUI do not observe the bundle. Safe to call before
+    /// ``swizzleMainBundle()`` or any install; it just stages the bundles until content exists.
+    public func setLanguage(_ languageCode: String?, makeDefault: Bool = false) {
+        selectedLanguage = languageCode
+        if makeDefault {
+            if let languageCode {
+                defaults.set(languageCode, forKey: Self.persistedLanguageKey)
+            } else {
+                defaults.removeObject(forKey: Self.persistedLanguageKey)
+            }
+        }
+        refreshOTABundle()
     }
 
-    /// The installed OTA bundle narrowed to the app's selected language, or `nil` if none is installed
-    /// or the language isn't shipped in the bundle.
-    private func resolveOTALocaleBundle() -> Bundle? {
+    /// Restores a previously persisted ``selectedLanguage`` (from ``setLanguage(_:makeDefault:)`` with
+    /// `makeDefault: true`). Called at init, before any refresh, so a relaunch serves the saved language.
+    func loadPersistedLanguage() {
+        selectedLanguage = defaults.string(forKey: Self.persistedLanguageKey)
+    }
+
+    /// Recomputes both resolution bundles for the current language and hands them to the swizzler:
+    /// the OTA `.lproj` (from the installed bundle) and — only when a language is explicitly selected —
+    /// the forced-language app `.lproj` (from `Bundle.main`). Called on install and from ``setLanguage``.
+    private func refreshOTABundle() {
+        let candidates = preferredLanguageCandidates()
+        let ota = resolveOTALocaleBundle(candidates)
+        let appFallback = (selectedLanguage == nil) ? nil : resolveMainLprojBundle(candidates)
+        WordiyBundleSwizzler.shared.setBundles(ota: ota, appFallback: appFallback)
+    }
+
+    /// The installed OTA bundle narrowed to the first matching language, or `nil` if none is installed
+    /// or no candidate is shipped in the bundle.
+    private func resolveOTALocaleBundle(_ candidates: [String]) -> Bundle? {
         guard let url = installedBundleURL, let whole = Bundle(url: url) else { return nil }
-        for language in preferredLanguageCandidates() {
-            if let lprojPath = whole.path(forResource: language, ofType: "lproj"),
+        return localeBundle(in: whole, candidates: candidates)
+    }
+
+    /// `Bundle.main` narrowed to the first matching language `.lproj`, or `nil` if the app ships none.
+    /// Used as the baked-in fallback when a language is explicitly selected (so a key missing from OTA
+    /// renders in the chosen language, not the launch language).
+    private func resolveMainLprojBundle(_ candidates: [String]) -> Bundle? {
+        localeBundle(in: .main, candidates: candidates)
+    }
+
+    /// Loads `<bundle>/<lang>.lproj` as a `Bundle` for the first matching candidate.
+    private func localeBundle(in bundle: Bundle, candidates: [String]) -> Bundle? {
+        for language in candidates {
+            if let lprojPath = bundle.path(forResource: language, ofType: "lproj"),
                 let localeBundle = Bundle(path: lprojPath)
             {
                 return localeBundle
@@ -198,10 +246,10 @@ public final class Wordiy {
         return nil
     }
 
-    /// The app's selected language, plus its bare language code as a fallback (e.g. `en-US` → `en`).
+    /// The selected/app/system language, plus its bare language code as a fallback (e.g. `en-US` → `en`).
     private func preferredLanguageCandidates() -> [String] {
         let primary =
-            preferredLanguageOverride
+            selectedLanguage
             ?? Bundle.main.preferredLocalizations.first
             ?? Locale.preferredLanguages.first
             ?? "en"

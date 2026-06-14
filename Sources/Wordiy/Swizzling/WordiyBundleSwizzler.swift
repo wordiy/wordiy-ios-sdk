@@ -5,10 +5,14 @@ import ObjectiveC
 ///
 /// `NSLocalizedString` calls `-[NSBundle localizedStringForKey:value:table:]` from any thread, but
 /// ``Wordiy`` is `@MainActor`. This controller is the thread-safe seam between them: ``Wordiy`` writes
-/// the active OTA bundle on the main actor (``setOTABundle(_:)``); the swizzled method reads it
-/// off-main under a lock (``otaLocaleBundleSnapshot()``). The OTA bundle is a real `NSBundle`, so the
-/// actual lookup — `.strings` parsing, table resolution, plurals — is delegated to Foundation, which
-/// mirrors how Lokalise works (it keeps no parsed dictionary of its own).
+/// the active bundles on the main actor (``setBundles(ota:appFallback:)``); the swizzled method reads
+/// them off-main under a lock (``currentBundles()``). Both are real `NSBundle`s, so the actual lookup —
+/// `.strings` parsing, table resolution, plurals — is delegated to Foundation, which mirrors how
+/// Lokalise works (it keeps no parsed dictionary of its own; it too holds a local + an OTA locale bundle).
+///
+/// The swizzle resolves in three tiers: the OTA `.lproj` (if it has the key), else the forced-language
+/// app `.lproj` (`appFallback`, set only when a language is explicitly selected), else the original
+/// `Bundle.main` implementation (the launch/system language).
 final class WordiyBundleSwizzler: @unchecked Sendable {
 
     static let shared = WordiyBundleSwizzler()
@@ -33,21 +37,27 @@ final class WordiyBundleSwizzler: @unchecked Sendable {
     private let lock = NSLock()
     // Everything below is guarded by `lock`.
     private var otaLocaleBundle: Bundle?
+    private var appFallbackBundle: Bundle?
     private var originalIMP: IMP?
     private var isSwizzled = false
 
-    // MARK: - OTA bundle (written on the main actor by Wordiy, read off-main by the swizzle)
+    // MARK: - Active bundles (written on the main actor by Wordiy, read off-main by the swizzle)
 
-    func setOTABundle(_ bundle: Bundle?) {
+    /// Sets both resolution bundles together. `appFallback` is the forced-language `Bundle.main`
+    /// `.lproj`, or `nil` to follow the system language.
+    func setBundles(ota: Bundle?, appFallback: Bundle?) {
         lock.lock()
         defer { lock.unlock() }
-        otaLocaleBundle = bundle
+        otaLocaleBundle = ota
+        appFallbackBundle = appFallback
     }
 
-    func otaLocaleBundleSnapshot() -> Bundle? {
+    /// Reads both bundles in one critical section, so the swizzle never sees a torn pair (a fresh OTA
+    /// bundle with a stale fallback) when a check completes mid-language-switch.
+    func currentBundles() -> (ota: Bundle?, appFallback: Bundle?) {
         lock.lock()
         defer { lock.unlock() }
-        return otaLocaleBundle
+        return (otaLocaleBundle, appFallbackBundle)
     }
 
     // MARK: - Swizzle install / teardown (idempotent)

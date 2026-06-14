@@ -16,8 +16,9 @@ final class SwizzleTests: XCTestCase {
         // CRITICAL: a leaked swizzle would corrupt NSLocalizedString for every other test class.
         let w = Wordiy.shared
         w.deswizzleMainBundle()
-        WordiyBundleSwizzler.shared.setOTABundle(nil)
-        w.preferredLanguageOverride = nil
+        WordiyBundleSwizzler.shared.setBundles(ota: nil, appFallback: nil)
+        w.setLanguage(nil)
+        w.defaults = .standard
         w.urlSession = URLSession.shared
         w.store = try? BundleStore()
         try? FileManager.default.removeItem(at: workDir)
@@ -45,7 +46,7 @@ final class SwizzleTests: XCTestCase {
         let updated = try await w.checkForUpdates()
         XCTAssertTrue(updated)
 
-        w.preferredLanguageOverride = "en"
+        w.setLanguage("en")
         w.swizzleMainBundle()
         return store
     }
@@ -124,5 +125,80 @@ final class SwizzleTests: XCTestCase {
         // Sanity: Bundle.main IS routed.
         XCTAssertEqual(
             Bundle.main.localizedString(forKey: "greeting", value: nil, table: nil), "Hello")
+    }
+
+    // MARK: - Language selection
+
+    /// Three-tier resolution: OTA wins; else the forced-language app `.lproj`; else the key. The host's
+    /// `Bundle.main` has no `.lproj`, so the forced fallback is injected directly as a temp `.lproj`.
+    func testForcedFallbackResolvesThreeTiers() async throws {
+        try await installFixtureAndSwizzle("fallback")
+
+        // Build <workDir>/xx.lproj/Localizable.strings with a key absent from the OTA bundle.
+        let lprojDir = workDir.appendingPathComponent("xx.lproj", isDirectory: true)
+        try FileManager.default.createDirectory(at: lprojDir, withIntermediateDirectories: true)
+        try #""onlyInApp" = "FromApp";"#.write(
+            to: lprojDir.appendingPathComponent("Localizable.strings"),
+            atomically: true, encoding: .utf8)
+        let fallback = Bundle(path: lprojDir.path)
+
+        // Keep the OTA bundle the SDK already resolved; inject the forced fallback alongside it.
+        let ota = WordiyBundleSwizzler.shared.currentBundles().ota
+        XCTAssertNotNil(ota)
+        WordiyBundleSwizzler.shared.setBundles(ota: ota, appFallback: fallback)
+
+        // (a) in OTA → OTA value
+        XCTAssertEqual(
+            Bundle.main.localizedString(forKey: "greeting", value: nil, table: nil), "Hello")
+        // (b) not in OTA but in the forced fallback → fallback value
+        XCTAssertEqual(
+            Bundle.main.localizedString(forKey: "onlyInApp", value: nil, table: nil), "FromApp")
+        // (c) in neither → the key
+        XCTAssertEqual(
+            Bundle.main.localizedString(forKey: "__nope__", value: nil, table: nil), "__nope__")
+    }
+
+    /// `setLanguage` drives which OTA `.lproj` is served. The fixture ships only `en`.
+    func testSetLanguageDrivesOTAResolution() async throws {
+        let w = Wordiy.shared
+        try await installFixtureAndSwizzle("setlang")  // ends with setLanguage("en") + swizzle
+        XCTAssertEqual(
+            Bundle.main.localizedString(forKey: "greeting", value: nil, table: nil), "Hello")
+
+        // No fr.lproj in OTA and none in the host bundle → OTA miss, no forced fallback → key.
+        w.setLanguage("fr")
+        XCTAssertEqual(
+            Bundle.main.localizedString(forKey: "greeting", value: nil, table: nil), "greeting")
+
+        // Switching back restores the OTA hit.
+        w.setLanguage("en")
+        XCTAssertEqual(
+            Bundle.main.localizedString(forKey: "greeting", value: nil, table: nil), "Hello")
+    }
+
+    /// Persistence is opt-in via `makeDefault`, mirroring Lokalise.
+    func testMakeDefaultPersistsOptIn() throws {
+        let w = Wordiy.shared
+        let suite = "wordiy-test-\(UUID().uuidString)"
+        let store = UserDefaults(suiteName: suite)!
+        defer { store.removePersistentDomain(forName: suite) }
+        w.defaults = store
+        let key = "com.wordiy.selectedLanguage"
+
+        w.setLanguage("ar", makeDefault: true)
+        XCTAssertEqual(store.string(forKey: key), "ar")
+
+        // makeDefault:false is session-only — it must not overwrite the saved default.
+        w.setLanguage("en", makeDefault: false)
+        XCTAssertEqual(store.string(forKey: key), "ar")
+
+        // makeDefault:true with nil clears the saved default.
+        w.setLanguage(nil, makeDefault: true)
+        XCTAssertNil(store.string(forKey: key))
+
+        // Restoration reads the seam into selectedLanguage.
+        store.set("ar", forKey: key)
+        w.loadPersistedLanguage()
+        XCTAssertEqual(w.selectedLanguage, "ar")
     }
 }
