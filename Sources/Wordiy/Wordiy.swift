@@ -105,6 +105,10 @@ public final class Wordiy {
     /// Key under which ``setLanguage(_:makeDefault:)`` persists the selected language.
     private static let persistedLanguageKey = "com.wordiy.selectedLanguage"
 
+    /// Live subscribers to ``localizationUpdates()``, keyed by a per-stream id. Main-actor-isolated,
+    /// so no lock is needed; mutated from `LocalizationUpdates.swift`.
+    var localizationContinuations: [UUID: AsyncStream<Void>.Continuation] = [:]
+
     // MARK: - Update
 
     /// Checks the server for a newer translation bundle and, if available, downloads, unzips, and
@@ -142,8 +146,9 @@ public final class Wordiy {
 
         if result.updated {
             installedBundleVersion = result.version ?? store.installedVersion()
-            // Pick up the freshly installed strings so an active swizzle serves them.
+            // Pick up the freshly installed strings so an active swizzle serves them, then notify.
             refreshOTABundle()
+            notifyLocalizationChanged()
         }
         return result.updated
     }
@@ -193,6 +198,7 @@ public final class Wordiy {
     /// Re-render your UI after calling — UIKit/SwiftUI do not observe the bundle. Safe to call before
     /// ``swizzleMainBundle()`` or any install; it just stages the bundles until content exists.
     public func setLanguage(_ languageCode: String?, makeDefault: Bool = false) {
+        let changed = languageCode != selectedLanguage
         selectedLanguage = languageCode
         if makeDefault {
             if let languageCode {
@@ -202,6 +208,8 @@ public final class Wordiy {
             }
         }
         refreshOTABundle()
+        // Re-selecting the same language changes nothing the UI can see, so only notify on a real change.
+        if changed { notifyLocalizationChanged() }
     }
 
     /// Restores a previously persisted ``selectedLanguage`` (from ``setLanguage(_:makeDefault:)`` with
