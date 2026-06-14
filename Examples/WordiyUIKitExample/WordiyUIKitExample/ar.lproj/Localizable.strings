@@ -1,0 +1,3 @@
+/* Baked-in Arabic defaults. The " (محلي)" marker = "local", to tell these apart from OTA values. */
+"welcome" = "أهلاً بك في وردي (محلي)";
+"intro" = "هذه رسالة تعريفية (محلي)";

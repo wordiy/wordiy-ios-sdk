@@ -1,131 +1,106 @@
 import UIKit
 import Wordiy
 
-/// Shows the resolved Wordiy configuration and drives the OTA check, then displays concrete proof the
-/// bundle was fetched/unzipped/installed: on-disk path, locales, and a real key→value from the bundle.
+/// Shows Wordiy's core: two labels resolved with plain `NSLocalizedString`, plus a live language
+/// switcher. The app's baked-in strings are marked "(local)"/"(محلي)"; after an OTA check installs a
+/// bundle, the same keys resolve to the OTA values and the marker disappears — the swizzle (installed
+/// in `AppDelegate`) does this with no call-site changes. Tapping a language calls
+/// `Wordiy.shared.setLanguage(_:makeDefault:)` and re-renders, switching both layers live.
 final class ViewController: UIViewController {
 
-    private let stack = UIStackView()
+    private let languageControl = UISegmentedControl(items: ["English", "العربية"])
+    private let languageCodes = ["en", "ar"]
+
+    private let welcomeLabel = UILabel()
+    private let introLabel = UILabel()
     private let statusLabel = UILabel()
-    private let detailLabel = UILabel()
     private let button = UIButton(type: .system)
+    private let stack = UIStackView()
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         title = "Wordiy SDK"
 
-        stack.axis = .vertical
-        stack.spacing = 10
-        stack.alignment = .fill
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
-            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
-        ])
+        languageControl.addTarget(self, action: #selector(languageChanged), for: .valueChanged)
 
-        let w = Wordiy.shared
-        addRow("projectID", w.projectID ?? "—")
-        addRow("token", mask(w.token))
-        addRow("environment", w.localizationType.rawValue)
-        addRow("currentVersion", w.currentVersion.isEmpty ? "—" : w.currentVersion)
-        addRow("platform", w.platform)
-
-        statusLabel.font = .monospacedSystemFont(ofSize: 16, weight: .semibold)
+        welcomeLabel.font = .preferredFont(forTextStyle: .title2)
+        welcomeLabel.numberOfLines = 0
+        introLabel.font = .preferredFont(forTextStyle: .body)
+        introLabel.textColor = .secondaryLabel
+        introLabel.numberOfLines = 0
+        statusLabel.font = .preferredFont(forTextStyle: .footnote)
+        statusLabel.textColor = .tertiaryLabel
         statusLabel.numberOfLines = 0
-        detailLabel.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        detailLabel.textColor = .secondaryLabel
-        detailLabel.numberOfLines = 0
+        [welcomeLabel, introLabel, statusLabel].forEach { $0.textAlignment = .natural }
 
-        button.setTitle("Check for OTA updates", for: .normal)
+        button.setTitle("Check for updates", for: .normal)
         button.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         button.contentHorizontalAlignment = .leading
         button.addTarget(self, action: #selector(checkTapped), for: .touchUpInside)
 
-        stack.addArrangedSubview(spacer(12))
-        stack.addArrangedSubview(statusLabel)
-        stack.addArrangedSubview(detailLabel)
-        stack.addArrangedSubview(spacer(4))
-        stack.addArrangedSubview(button)
+        [languageControl, welcomeLabel, introLabel, statusLabel, button].forEach(stack.addArrangedSubview)
+        stack.axis = .vertical
+        stack.spacing = 16
+        stack.alignment = .fill
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 32),
+            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
+        ])
 
-        refreshDetail()
+        // Reflect any persisted/active language (Wordiy restored it at init); default to English.
+        let code = Wordiy.shared.selectedLanguage ?? "en"
+        languageControl.selectedSegmentIndex = languageCodes.firstIndex(of: code) ?? 0
+        applyDirection(for: code)
+
+        render()
         runCheck()
+    }
+
+    /// Re-reads the two strings. UIKit doesn't observe the bundle, so this must run after each check
+    /// and after every language switch.
+    private func render() {
+        welcomeLabel.text = NSLocalizedString("welcome", comment: "Greeting on the home screen")
+        introLabel.text = NSLocalizedString("intro", comment: "Short introduction on the home screen")
+    }
+
+    @objc private func languageChanged() {
+        let code = languageCodes[languageControl.selectedSegmentIndex]
+        Wordiy.shared.setLanguage(code, makeDefault: true)  // remember across launches
+        applyDirection(for: code)
+        render()
+    }
+
+    /// Minimal RTL: flip the layout direction for Arabic. Labels use `.natural` alignment, which follows
+    /// the effective direction set here.
+    private func applyDirection(for code: String) {
+        let attribute: UISemanticContentAttribute = (code == "ar") ? .forceRightToLeft : .forceLeftToRight
+        view.semanticContentAttribute = attribute
+        stack.semanticContentAttribute = attribute
     }
 
     @objc private func checkTapped() { runCheck() }
 
     private func runCheck() {
-        statusLabel.text = "OTA: checking…"
+        statusLabel.text = "Checking…"
         button.isEnabled = false
-        Wordiy.shared.checkForUpdates { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success(let updated):
-                self.statusLabel.text =
+        // The async API has no @Sendable completion closure, so this unstructured Task — which inherits
+        // the view controller's main-actor isolation — updates the UI without concurrency warnings.
+        Task {
+            defer { button.isEnabled = true }
+            do {
+                let updated = try await Wordiy.shared.checkForUpdates()
+                statusLabel.text =
                     updated
-                    ? "OTA: ✓ downloaded & installed v\(Wordiy.shared.installedBundleVersion ?? "?")"
-                    : "OTA: up to date (server has nothing newer than currentVersion)"
-            case .failure(let error):
-                self.statusLabel.text = "OTA: ✗ \(error)"
+                    ? "Updated to v\(Wordiy.shared.installedBundleVersion ?? "?")"
+                    : "Already up to date"
+            } catch {
+                statusLabel.text = "Update failed: \(error)"
             }
-            self.button.isEnabled = true
-            self.refreshDetail()
+            render()
         }
-    }
-
-    /// Concrete proof the content actually landed on disk.
-    private func refreshDetail() {
-        var lines: [String] = []
-        lines.append("reports current_version: \(Wordiy.shared.reportedVersion)")
-        lines.append("installed version: \(Wordiy.shared.installedBundleVersion ?? "—")")
-
-        if let bundleURL = Wordiy.shared.installedBundleURL {
-            lines.append("on disk: yes")
-            lines.append("path: …/\(bundleURL.lastPathComponent)")
-
-            let resources = bundleURL.appendingPathComponent("Contents/Resources")
-            let locales =
-                ((try? FileManager.default.contentsOfDirectory(atPath: resources.path)) ?? [])
-                .filter { $0.hasSuffix(".lproj") }
-                .map { $0.replacingOccurrences(of: ".lproj", with: "") }
-                .sorted()
-            lines.append("locales: \(locales.isEmpty ? "—" : locales.joined(separator: ", "))")
-
-            // Read the en strings file directly (.strings is plist format) to prove real content.
-            let en = resources.appendingPathComponent("en.lproj/Localizable.strings")
-            if let dict = NSDictionary(contentsOf: en) as? [String: String], let first = dict.first {
-                lines.append("en keys: \(dict.count)")
-                lines.append("sample: \"\(first.key)\" → \"\(first.value)\"")
-            }
-        } else {
-            lines.append("on disk: no (nothing downloaded yet)")
-        }
-        detailLabel.text = lines.joined(separator: "\n")
-    }
-
-    // MARK: - Helpers
-
-    private func addRow(_ key: String, _ value: String) {
-        let label = UILabel()
-        label.numberOfLines = 0
-        label.font = .monospacedSystemFont(ofSize: 15, weight: .regular)
-        let text = NSMutableAttributedString(
-            string: "\(key): ", attributes: [.foregroundColor: UIColor.secondaryLabel])
-        text.append(NSAttributedString(string: value, attributes: [.foregroundColor: UIColor.label]))
-        label.attributedText = text
-        stack.addArrangedSubview(label)
-    }
-
-    private func spacer(_ height: CGFloat) -> UIView {
-        let v = UIView()
-        v.heightAnchor.constraint(equalToConstant: height).isActive = true
-        return v
-    }
-
-    private func mask(_ token: String?) -> String {
-        guard let token, token.count > 8 else { return token ?? "—" }
-        return String(token.prefix(8)) + "…"
     }
 }
