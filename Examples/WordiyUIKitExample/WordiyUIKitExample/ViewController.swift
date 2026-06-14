@@ -1,11 +1,15 @@
+import SwiftUI
 import UIKit
 import Wordiy
 
 /// Shows Wordiy's core: two labels resolved with plain `NSLocalizedString`, plus a live language
 /// switcher. The app's baked-in strings are marked "(local)"/"(محلي)"; after an OTA check installs a
 /// bundle, the same keys resolve to the OTA values and the marker disappears — the swizzle (installed
-/// in `AppDelegate`) does this with no call-site changes. Tapping a language calls
-/// `Wordiy.shared.setLanguage(_:makeDefault:)` and re-renders, switching both layers live.
+/// in `AppDelegate`) does this with no call-site changes.
+///
+/// Refresh is driven by `Wordiy.shared.localizationUpdates()`: the SDK emits after an OTA install or a
+/// language switch, and this screen re-reads its labels in response — no manual re-render at the call
+/// site. The "SwiftUI" button opens an equivalent SwiftUI screen that refreshes the same way.
 final class ViewController: UIViewController {
 
     private let languageControl = UISegmentedControl(items: ["English", "العربية"])
@@ -17,10 +21,14 @@ final class ViewController: UIViewController {
     private let button = UIButton(type: .system)
     private let stack = UIStackView()
 
+    private var localizationTask: Task<Void, Never>?
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         title = "Wordiy SDK"
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "SwiftUI", style: .plain, target: self, action: #selector(showSwiftUI))
 
         languageControl.addTarget(self, action: #selector(languageChanged), for: .valueChanged)
 
@@ -56,22 +64,33 @@ final class ViewController: UIViewController {
         languageControl.selectedSegmentIndex = languageCodes.firstIndex(of: code) ?? 0
         applyDirection(for: code)
 
-        render()
+        render()  // first paint; subsequent refreshes come from the update stream
+        observeLocalizationChanges()
         runCheck()
     }
 
-    /// Re-reads the two strings. UIKit doesn't observe the bundle, so this must run after each check
-    /// and after every language switch.
+    deinit { localizationTask?.cancel() }
+
+    /// Re-reads the two strings. Called once for first paint, then on every `localizationUpdates()` event.
     private func render() {
         welcomeLabel.text = NSLocalizedString("welcome", comment: "Greeting on the home screen")
         introLabel.text = NSLocalizedString("intro", comment: "Short introduction on the home screen")
     }
 
+    /// Re-render whenever the SDK reports a localization change (OTA install or language switch) —
+    /// including changes made from the SwiftUI screen.
+    private func observeLocalizationChanges() {
+        localizationTask = Task { [weak self] in
+            for await _ in Wordiy.shared.localizationUpdates() {
+                self?.render()
+            }
+        }
+    }
+
     @objc private func languageChanged() {
         let code = languageCodes[languageControl.selectedSegmentIndex]
-        Wordiy.shared.setLanguage(code, makeDefault: true)  // remember across launches
-        applyDirection(for: code)
-        render()
+        Wordiy.shared.setLanguage(code, makeDefault: true)  // remember across launches; emits an update
+        applyDirection(for: code)  // layout direction isn't a localized string, so set it directly
     }
 
     /// Minimal RTL: flip the layout direction for Arabic. Labels use `.natural` alignment, which follows
@@ -88,7 +107,8 @@ final class ViewController: UIViewController {
         statusLabel.text = "Checking…"
         button.isEnabled = false
         // The async API has no @Sendable completion closure, so this unstructured Task — which inherits
-        // the view controller's main-actor isolation — updates the UI without concurrency warnings.
+        // the view controller's main-actor isolation — updates the UI without concurrency warnings. A
+        // successful install emits an update, so the labels refresh via the stream (no render() here).
         Task {
             defer { button.isEnabled = true }
             do {
@@ -100,7 +120,12 @@ final class ViewController: UIViewController {
             } catch {
                 statusLabel.text = "Update failed: \(error)"
             }
-            render()
         }
+    }
+
+    @objc private func showSwiftUI() {
+        let host = UIHostingController(rootView: LocalizedSwiftUIView())
+        host.title = "SwiftUI"
+        navigationController?.pushViewController(host, animated: true)
     }
 }
