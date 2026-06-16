@@ -62,7 +62,6 @@ final class ViewController: UIViewController {
         // Reflect any persisted/active language (Wordiy restored it at init); default to English.
         let code = Wordiy.shared.selectedLanguage ?? "en"
         languageControl.selectedSegmentIndex = languageCodes.firstIndex(of: code) ?? 0
-        applyDirection(for: code)
 
         render()  // first paint; subsequent refreshes come from the update stream
         observeLocalizationChanges()
@@ -89,16 +88,9 @@ final class ViewController: UIViewController {
 
     @objc private func languageChanged() {
         let code = languageCodes[languageControl.selectedSegmentIndex]
-        Wordiy.shared.setLanguage(code, makeDefault: true)  // remember across launches; emits an update
-        applyDirection(for: code)  // layout direction isn't a localized string, so set it directly
-    }
-
-    /// Minimal RTL: flip the layout direction for Arabic. Labels use `.natural` alignment, which follows
-    /// the effective direction set here.
-    private func applyDirection(for code: String) {
-        let attribute: UISemanticContentAttribute = (code == "ar") ? .forceRightToLeft : .forceLeftToRight
-        view.semanticContentAttribute = attribute
-        stack.semanticContentAttribute = attribute
+        // Remember across launches + emit an update. The window's layout direction (managed in
+        // SceneDelegate) and the labels both follow from this — no per-view direction forcing here.
+        Wordiy.shared.setLanguage(code, makeDefault: true)
     }
 
     @objc private func checkTapped() { runCheck() }
