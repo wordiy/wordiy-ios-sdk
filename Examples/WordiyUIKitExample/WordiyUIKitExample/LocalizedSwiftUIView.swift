@@ -52,6 +52,5 @@ struct LocalizedSwiftUIView: View {
                 }
             }
         }
-        .environment(\.layoutDirection, language.wrappedValue == "ar" ? .rightToLeft : .leftToRight)
     }
 }
