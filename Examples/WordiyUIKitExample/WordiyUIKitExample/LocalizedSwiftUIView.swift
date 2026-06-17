@@ -25,6 +25,8 @@ struct LocalizedSwiftUIView: View {
                     .font(.title3)
                 Text(NSLocalizedString("intro", comment: ""))
                     .foregroundStyle(.secondary)
+                // A %@ placeholder formatted with a sample name.
+                Text(String(format: NSLocalizedString("with-var", comment: ""), "Sami"))
             }
 
             Picker("Language", selection: language) {
