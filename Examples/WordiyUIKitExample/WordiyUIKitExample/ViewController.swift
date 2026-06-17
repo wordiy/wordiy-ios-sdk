@@ -2,7 +2,8 @@ import SwiftUI
 import UIKit
 import Wordiy
 
-/// Shows Wordiy's core: two labels resolved with plain `NSLocalizedString`, plus a live language
+/// Shows Wordiy's core: labels resolved with plain `NSLocalizedString` (incl. a `%@` placeholder
+/// formatted via `String(format:)`), plus a live language
 /// switcher. The app's baked-in strings are marked "(local)"/"(محلي)"; after an OTA check installs a
 /// bundle, the same keys resolve to the OTA values and the marker disappears — the swizzle (installed
 /// in `AppDelegate`) does this with no call-site changes.
@@ -17,9 +18,13 @@ final class ViewController: UIViewController {
 
     private let welcomeLabel = UILabel()
     private let introLabel = UILabel()
+    private let varLabel = UILabel()
     private let statusLabel = UILabel()
     private let button = UIButton(type: .system)
     private let stack = UIStackView()
+
+    /// Sample value substituted into the `with-var` placeholder (a real app would pass a user value).
+    private let sampleName = "Sami"
 
     private var localizationTask: Task<Void, Never>?
 
@@ -37,17 +42,20 @@ final class ViewController: UIViewController {
         introLabel.font = .preferredFont(forTextStyle: .body)
         introLabel.textColor = .secondaryLabel
         introLabel.numberOfLines = 0
+        varLabel.font = .preferredFont(forTextStyle: .callout)
+        varLabel.numberOfLines = 0
         statusLabel.font = .preferredFont(forTextStyle: .footnote)
         statusLabel.textColor = .tertiaryLabel
         statusLabel.numberOfLines = 0
-        [welcomeLabel, introLabel, statusLabel].forEach { $0.textAlignment = .natural }
+        [welcomeLabel, introLabel, varLabel, statusLabel].forEach { $0.textAlignment = .natural }
 
         button.setTitle("Check for updates", for: .normal)
         button.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         button.contentHorizontalAlignment = .leading
         button.addTarget(self, action: #selector(checkTapped), for: .touchUpInside)
 
-        [languageControl, welcomeLabel, introLabel, statusLabel, button].forEach(stack.addArrangedSubview)
+        [languageControl, welcomeLabel, introLabel, varLabel, statusLabel, button].forEach(
+            stack.addArrangedSubview)
         stack.axis = .vertical
         stack.spacing = 16
         stack.alignment = .fill
@@ -70,10 +78,13 @@ final class ViewController: UIViewController {
 
     deinit { localizationTask?.cancel() }
 
-    /// Re-reads the two strings. Called once for first paint, then on every `localizationUpdates()` event.
+    /// Re-reads the localized strings. Called once for first paint, then on every `localizationUpdates()`
+    /// event. `with-var` carries a `%@` placeholder formatted with a sample name via `String(format:)`.
     private func render() {
         welcomeLabel.text = NSLocalizedString("welcome", comment: "Greeting on the home screen")
         introLabel.text = NSLocalizedString("intro", comment: "Short introduction on the home screen")
+        varLabel.text = String(
+            format: NSLocalizedString("with-var", comment: "Greeting with the user's name"), sampleName)
     }
 
     /// Re-render whenever the SDK reports a localization change (OTA install or language switch) —

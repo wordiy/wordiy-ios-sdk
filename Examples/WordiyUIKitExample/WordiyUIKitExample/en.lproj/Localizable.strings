@@ -2,3 +2,4 @@
    OTA values that override them after Wordiy.shared.checkForUpdates(). */
 "welcome" = "welcome to wordiy (local)";
 "intro" = "This is an introduction message (local)";
+"with-var" = "Hello %@, welcome to Wordiy! (local)";
