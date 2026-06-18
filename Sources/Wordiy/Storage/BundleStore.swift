@@ -3,11 +3,16 @@ import Foundation
 /// Manages the on-device storage of the active translation bundle.
 ///
 /// Stores under `Application Support/Wordiy/` (persistent, unlike `Caches/`), excluded from iCloud/iTunes
-/// backup. Installs use a **stage-then-promote** swap so a failed/interrupted update can never corrupt
-/// the active bundle.
+/// backup. Each install lands in a **new generation directory** (`wordiy-<n>.bundle`, `n` monotonic) and
+/// older generations are removed. The fresh path matters: `NSBundle` caches a bundle's resources per path
+/// for the process lifetime, so reusing one path would serve stale strings after a mid-session re-install
+/// (only a relaunch would clear it). A new path each time guarantees the swizzle loads fresh content.
 struct BundleStore: Sendable {
 
     let rootDir: URL
+
+    private static let prefix = "wordiy-"
+    private static let suffix = ".bundle"
 
     /// Production initializer: `Application Support/Wordiy/`.
     init() throws {
@@ -22,41 +27,78 @@ struct BundleStore: Sendable {
         self.rootDir = rootDir
     }
 
-    /// The active installed bundle, e.g. `…/Wordiy/wordiy.bundle`.
-    var activeBundleURL: URL {
-        rootDir.appendingPathComponent("wordiy.bundle", isDirectory: true)
+    /// The newest installed generation (e.g. `…/Wordiy/wordiy-3.bundle`), or `nil` if none is installed.
+    var activeBundleURL: URL? {
+        installedGenerations().last?.url
     }
 
-    /// Installs the bundle found inside `extractedDir`, atomically replacing the active bundle.
-    /// - Returns: the active bundle URL and its version (from `Contents/Info.plist`).
+    /// Installs the bundle found inside `extractedDir` into a fresh generation directory, then removes
+    /// older generations. A failed install leaves the previous generation active.
+    /// - Returns: the new bundle URL and its version (from `Contents/Info.plist`).
     @discardableResult
     func install(fromExtractedDir extractedDir: URL) throws -> (bundleURL: URL, version: String?) {
         let fm = FileManager.default
         let source = try locateBundle(in: extractedDir)
         try ensureRoot()
 
-        let staging = rootDir.appendingPathComponent("wordiy.bundle.staging", isDirectory: true)
-        try? fm.removeItem(at: staging)
+        let generations = installedGenerations()
+        let next = (generations.last?.number ?? 0) + 1
+        let target = rootDir.appendingPathComponent(
+            "\(Self.prefix)\(next)\(Self.suffix)", isDirectory: true)
 
+        // Stage on the same volume as the target, then atomically move it into place — a brand-new path
+        // `NSBundle` has never loaded, so the swizzle picks up the new content without a relaunch.
+        let staging = rootDir.appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: true)
+        try? fm.removeItem(at: staging)
         do {
-            // Copy onto the same volume as the active bundle so the final swap is atomic.
             try fm.copyItem(at: source, to: staging)
-            if fm.fileExists(atPath: activeBundleURL.path) {
-                _ = try fm.replaceItemAt(activeBundleURL, withItemAt: staging)
-            } else {
-                try fm.moveItem(at: staging, to: activeBundleURL)
-            }
+            try fm.moveItem(at: staging, to: target)
         } catch {
             try? fm.removeItem(at: staging)
             throw WordiyError.io(error)
         }
 
-        return (activeBundleURL, installedVersion())
+        // Best-effort cleanup of superseded generations (the new one is now active).
+        for generation in generations {
+            try? fm.removeItem(at: generation.url)
+        }
+
+        return (target, version(at: target))
     }
 
-    /// The `CFBundleVersion` of the installed bundle (read directly from `Contents/Info.plist`).
+    /// The `CFBundleVersion` of the active installed bundle, or `nil` if none is installed.
     func installedVersion() -> String? {
-        let plistURL = activeBundleURL.appendingPathComponent("Contents/Info.plist")
+        guard let url = activeBundleURL else { return nil }
+        return version(at: url)
+    }
+
+    /// Loads the active installed bundle as an `NSBundle`, or `nil` if not installed.
+    func loadInstalledBundle() -> Bundle? {
+        guard let url = activeBundleURL else { return nil }
+        return Bundle(url: url)
+    }
+
+    // MARK: - Helpers
+
+    /// All installed generation directories, ascending by counter (so `.last` is the newest).
+    private func installedGenerations() -> [(number: Int, url: URL)] {
+        let items =
+            (try? FileManager.default.contentsOfDirectory(
+                at: rootDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        return
+            items
+            .compactMap { url -> (number: Int, url: URL)? in
+                let name = url.lastPathComponent
+                guard name.hasPrefix(Self.prefix), name.hasSuffix(Self.suffix),
+                    let number = Int(name.dropFirst(Self.prefix.count).dropLast(Self.suffix.count))
+                else { return nil }
+                return (number, url)
+            }
+            .sorted { $0.number < $1.number }
+    }
+
+    private func version(at bundleURL: URL) -> String? {
+        let plistURL = bundleURL.appendingPathComponent("Contents/Info.plist")
         guard
             let data = try? Data(contentsOf: plistURL),
             let object = try? PropertyListSerialization.propertyList(from: data, format: nil),
@@ -66,14 +108,6 @@ struct BundleStore: Sendable {
         }
         return dict["CFBundleVersion"] as? String
     }
-
-    /// Loads the installed bundle as an `NSBundle` (for the lookup milestone), or `nil` if not installed.
-    func loadInstalledBundle() -> Bundle? {
-        guard FileManager.default.fileExists(atPath: activeBundleURL.path) else { return nil }
-        return Bundle(url: activeBundleURL)
-    }
-
-    // MARK: - Helpers
 
     private func ensureRoot() throws {
         let fm = FileManager.default

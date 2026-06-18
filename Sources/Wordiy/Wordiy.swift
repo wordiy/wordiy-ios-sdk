@@ -89,10 +89,10 @@ public final class Wordiy {
     /// On-disk location of the installed OTA bundle, or `nil` if none is installed.
     /// Useful for inspecting/validating the downloaded content (the lookup API comes later).
     public var installedBundleURL: URL? {
-        guard let store, FileManager.default.fileExists(atPath: store.activeBundleURL.path) else {
+        guard let url = store?.activeBundleURL, FileManager.default.fileExists(atPath: url.path) else {
             return nil
         }
-        return store.activeBundleURL
+        return url
     }
 
     private var isUpdating = false
