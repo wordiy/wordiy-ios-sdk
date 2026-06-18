@@ -27,6 +27,11 @@ struct LocalizedSwiftUIView: View {
                     .foregroundStyle(.secondary)
                 // A %@ placeholder formatted with a sample name.
                 Text(String(format: NSLocalizedString("with-var", comment: ""), "Sami"))
+                // A .stringsdict plural; pass the selected language's locale for the right plural rule.
+                Text(
+                    String(
+                        format: NSLocalizedString("items-count", comment: ""),
+                        locale: Locale(identifier: Wordiy.shared.selectedLanguage ?? "en"), 2))
             }
 
             Picker("Language", selection: language) {

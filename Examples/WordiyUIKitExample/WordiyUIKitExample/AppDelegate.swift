@@ -22,6 +22,18 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // Route NSLocalizedString through the OTA bundle. Loads any previously cached bundle from disk
         // now, so on relaunch the labels show OTA values immediately — before any network call.
         Wordiy.shared.swizzleMainBundle()
+        // The one app-level OTA check, at startup (boot pattern: setToken -> swizzleMainBundle ->
+        // checkForUpdates). Screens just observe localizationUpdates() and re-render — they don't fetch.
+        // checkForUpdates() returns true if a newer bundle was installed, false if already up to date,
+        // and throws on failure (it never crashes the app).
+        Task {
+            do {
+                let updated = try await Wordiy.shared.checkForUpdates()
+                print("Wordiy: \(updated ? "installed a new localization bundle" : "localizations already up to date")")
+            } catch {
+                print("Wordiy: localization update check failed — \(error)")
+            }
+        }
 
         return true
     }

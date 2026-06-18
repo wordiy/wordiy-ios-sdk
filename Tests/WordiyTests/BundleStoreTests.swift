@@ -30,23 +30,34 @@ final class BundleStoreTests: XCTestCase {
 
         let result = try store.install(fromExtractedDir: extracted)
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: store.activeBundleURL.path))
-        let strings = store.activeBundleURL.appendingPathComponent(
-            "Contents/Resources/en.lproj/Localizable.strings")
+        let active = try XCTUnwrap(store.activeBundleURL)
+        XCTAssertEqual(result.bundleURL.lastPathComponent, active.lastPathComponent)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: active.path))
+        let strings = active.appendingPathComponent("Contents/Resources/en.lproj/Localizable.strings")
         XCTAssertTrue(FileManager.default.fileExists(atPath: strings.path))
         XCTAssertEqual(result.version, "9.9.9")
         XCTAssertEqual(store.installedVersion(), "9.9.9")
     }
 
-    func testReinstallReplacesAtomically() throws {
+    /// A re-install must land on a NEW generation path (so `NSBundle` can't serve a cached, stale
+    /// bundle without a relaunch) and the previous generation must be cleaned up.
+    func testReinstallUsesFreshGenerationAndRemovesOld() throws {
         let store = BundleStore(rootDir: workDir.appendingPathComponent("store", isDirectory: true))
         try store.install(fromExtractedDir: try extractedFixture())
-        // Re-extract (fresh temp) and install again — should not throw and should still resolve.
+        let first = try XCTUnwrap(store.activeBundleURL)
+
+        // Re-extract (fresh temp) and install again.
         let again = workDir.appendingPathComponent("extract2", isDirectory: true)
         let zipURL = workDir.appendingPathComponent("fixture2.zip")
         try ZipTestSupport.sampleBundleZip().write(to: zipURL)
         try ZipArchiveReader.extract(zipURL: zipURL, to: again)
-        XCTAssertNoThrow(try store.install(fromExtractedDir: again))
+        try store.install(fromExtractedDir: again)
+        let second = try XCTUnwrap(store.activeBundleURL)
+
+        XCTAssertNotEqual(first, second, "a new install must use a fresh path")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: first.path), "old generation should be removed")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
         XCTAssertEqual(store.installedVersion(), "9.9.9")
     }
 

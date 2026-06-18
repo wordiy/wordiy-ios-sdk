@@ -41,8 +41,8 @@ final class CheckForUpdatesTests: XCTestCase {
 
         XCTAssertTrue(updated)
         XCTAssertEqual(w.installedBundleVersion, "9.9.9")
-        let strings = store.activeBundleURL.appendingPathComponent(
-            "Contents/Resources/en.lproj/Localizable.strings")
+        let active = try XCTUnwrap(store.activeBundleURL)
+        let strings = active.appendingPathComponent("Contents/Resources/en.lproj/Localizable.strings")
         XCTAssertTrue(FileManager.default.fileExists(atPath: strings.path))
     }
 
@@ -89,7 +89,7 @@ final class CheckForUpdatesTests: XCTestCase {
 
         let updated = try await w.checkForUpdates()
         XCTAssertFalse(updated)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: store.activeBundleURL.path))
+        XCTAssertNil(store.activeBundleURL, "no install means no active generation")
     }
 
     func testMissingCurrentVersionThrows() async throws {
