@@ -19,12 +19,15 @@ final class ViewController: UIViewController {
     private let welcomeLabel = UILabel()
     private let introLabel = UILabel()
     private let varLabel = UILabel()
+    private let itemsLabel = UILabel()
     private let statusLabel = UILabel()
     private let button = UIButton(type: .system)
     private let stack = UIStackView()
 
     /// Sample value substituted into the `with-var` placeholder (a real app would pass a user value).
     private let sampleName = "Sami"
+    /// Sample count for the `items-count` plural (a real app would pass a live value).
+    private let count = 2
 
     private var localizationTask: Task<Void, Never>?
 
@@ -44,17 +47,19 @@ final class ViewController: UIViewController {
         introLabel.numberOfLines = 0
         varLabel.font = .preferredFont(forTextStyle: .callout)
         varLabel.numberOfLines = 0
+        itemsLabel.font = .preferredFont(forTextStyle: .callout)
+        itemsLabel.numberOfLines = 0
         statusLabel.font = .preferredFont(forTextStyle: .footnote)
         statusLabel.textColor = .tertiaryLabel
         statusLabel.numberOfLines = 0
-        [welcomeLabel, introLabel, varLabel, statusLabel].forEach { $0.textAlignment = .natural }
+        [welcomeLabel, introLabel, varLabel, itemsLabel, statusLabel].forEach { $0.textAlignment = .natural }
 
         button.setTitle("Check for updates", for: .normal)
         button.titleLabel?.font = .preferredFont(forTextStyle: .headline)
         button.contentHorizontalAlignment = .leading
         button.addTarget(self, action: #selector(checkTapped), for: .touchUpInside)
 
-        [languageControl, welcomeLabel, introLabel, varLabel, statusLabel, button].forEach(
+        [languageControl, welcomeLabel, introLabel, varLabel, itemsLabel, statusLabel, button].forEach(
             stack.addArrangedSubview)
         stack.axis = .vertical
         stack.spacing = 16
@@ -71,20 +76,27 @@ final class ViewController: UIViewController {
         let code = Wordiy.shared.selectedLanguage ?? "en"
         languageControl.selectedSegmentIndex = languageCodes.firstIndex(of: code) ?? 0
 
+        // The OTA check runs once at app startup (AppDelegate) — not here. This screen only renders and
+        // observes; tapping "Check for updates" is the one explicit, user-initiated refresh.
         render()  // first paint; subsequent refreshes come from the update stream
         observeLocalizationChanges()
-        runCheck()
     }
 
     deinit { localizationTask?.cancel() }
 
     /// Re-reads the localized strings. Called once for first paint, then on every `localizationUpdates()`
-    /// event. `with-var` carries a `%@` placeholder formatted with a sample name via `String(format:)`.
+    /// event. `with-var` carries a `%@` placeholder; `items-count` is a `.stringsdict` plural. Both are
+    /// formatted via `String(format:)`; the plural passes the selected language's locale so the right
+    /// plural rule (e.g. Arabic's dual for 2) is applied even though the SDK forces language via the bundle.
     private func render() {
         welcomeLabel.text = NSLocalizedString("welcome", comment: "Greeting on the home screen")
         introLabel.text = NSLocalizedString("intro", comment: "Short introduction on the home screen")
         varLabel.text = String(
             format: NSLocalizedString("with-var", comment: "Greeting with the user's name"), sampleName)
+        let code = Wordiy.shared.selectedLanguage ?? "en"
+        itemsLabel.text = String(
+            format: NSLocalizedString("items-count", comment: "Count of items shown"),
+            locale: Locale(identifier: code), count)
     }
 
     /// Re-render whenever the SDK reports a localization change (OTA install or language switch) —
